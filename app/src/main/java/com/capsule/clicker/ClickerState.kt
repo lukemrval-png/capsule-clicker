@@ -1,6 +1,7 @@
 package com.capsule.clicker
 
 import android.graphics.Rect
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Общее состояние приложения: параметры, последний кадр экрана и шаблон.
@@ -19,12 +20,13 @@ object ClickerState {
     @Volatile var frameW = 0
     @Volatile var frameH = 0
 
-    // ── Шаблон цели в grayscale (0..255), размеры в пикселях экрана ──
-    @Volatile var template: IntArray? = null
-    @Volatile var templateW = 0
-    @Volatile var templateH = 0
+    // ── Несколько шаблонов целей (как разные капсулы в ПК-версии) ──
+    // grayscale (0..255) + размеры в пикселях экрана. Кликер ловит ЛЮБОЙ из них.
+    class Template(val gray: IntArray, val w: Int, val h: Int)
+    val templates = CopyOnWriteArrayList<Template>()
 
-    // Зона поиска в координатах экрана (null = весь экран)
+    // Зона поиска в координатах экрана (null = весь экран).
+    // Расширяется по мере добавления целей.
     @Volatile var region: Rect? = null
 
     // ── Диагностика ──
@@ -39,5 +41,5 @@ object ClickerState {
         statusListener?.invoke(s)
     }
 
-    fun hasTemplate(): Boolean = template != null && templateW > 0 && templateH > 0
+    fun hasTemplate(): Boolean = templates.isNotEmpty()
 }

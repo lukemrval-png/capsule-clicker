@@ -146,12 +146,11 @@ class ScreenCaptureService : Service() {
 
     private fun detect(frame: IntArray, regWH: IntArray, tmpWH: IntArray) {
         if (!ClickerState.running) return
-        val tmpl = ClickerState.template ?: run {
-            ClickerState.status("Шаблон не задан — нажми «Цель»")
+        val tmpls = ClickerState.templates
+        if (tmpls.isEmpty()) {
+            ClickerState.status("Целей нет — нажми «Цель»")
             return
         }
-        val tw = ClickerState.templateW
-        val th = ClickerState.templateH
         val scale = ClickerState.searchScale
 
         val base = ClickerState.region ?: Rect(0, 0, w, h)
@@ -161,22 +160,40 @@ class ScreenCaptureService : Service() {
             base.right.coerceIn(1, w),
             base.bottom.coerceIn(1, h)
         )
-        if (rc.width() < tw || rc.height() < th) {
-            ClickerState.status("Зона поиска меньше шаблона")
+        if (rc.width() < 4 || rc.height() < 4) {
+            ClickerState.status("Зона поиска слишком мала")
             return
         }
 
+        // Регион считаем один раз, дальше ищем в нём КАЖДУЮ цель, берём лучшую.
         val regGray = Matcher.cropGray(frame, w, h, rc)
         val regDown = Matcher.downscale(regGray, rc.width(), rc.height(), scale, regWH)
-        val tmplDown = Matcher.downscale(tmpl, tw, th, scale, tmpWH)
 
-        val hit = Matcher.match(regDown, regWH[0], regWH[1], tmplDown, tmpWH[0], tmpWH[1])
-        ClickerState.lastScore = hit.score
+        var best = -1f
+        var bestX = 0
+        var bestY = 0
+        var bestTW = 0
+        var bestTH = 0
+        var bestIdx = -1
 
-        if (hit.score >= ClickerState.threshold) {
+        for ((i, t) in tmpls.withIndex()) {
+            val tmplDown = Matcher.downscale(t.gray, t.w, t.h, scale, tmpWH)
+            val hit = Matcher.match(regDown, regWH[0], regWH[1], tmplDown, tmpWH[0], tmpWH[1])
+            if (hit.score > best) {
+                best = hit.score
+                bestX = hit.x
+                bestY = hit.y
+                bestTW = t.w
+                bestTH = t.h
+                bestIdx = i
+            }
+        }
+        ClickerState.lastScore = best
+
+        if (best >= ClickerState.threshold && bestIdx >= 0) {
             // Координаты из масштаба поиска -> в полный экран, к центру шаблона.
-            val fullX = rc.left + (hit.x / scale).toInt() + tw / 2
-            val fullY = rc.top + (hit.y / scale).toInt() + th / 2
+            val fullX = rc.left + (bestX / scale).toInt() + bestTW / 2
+            val fullY = rc.top + (bestY / scale).toInt() + bestTH / 2
             val now = System.currentTimeMillis()
             if (now - ClickerState.lastClickAt >= ClickerState.cooldownMs) {
                 val svc = ClickAccessibilityService.instance
@@ -185,14 +202,14 @@ class ScreenCaptureService : Service() {
                     ClickerState.lastClickAt = now
                     ClickerState.clicks++
                     ClickerState.status(
-                        "Клик #${ClickerState.clicks}  сходство ${fmt(hit.score)}  @($fullX,$fullY)"
+                        "Клик #${ClickerState.clicks}  цель ${bestIdx + 1}/${tmpls.size}  ${fmt(best)}  @($fullX,$fullY)"
                     )
                 } else {
                     ClickerState.status("Служба тапов ВЫКЛ — включи в настройках")
                 }
             }
         } else {
-            ClickerState.status("сходство ${fmt(hit.score)} / порог ${fmt(ClickerState.threshold)}")
+            ClickerState.status("сходство ${fmt(best)} / порог ${fmt(ClickerState.threshold)}  (целей ${tmpls.size})")
         }
     }
 

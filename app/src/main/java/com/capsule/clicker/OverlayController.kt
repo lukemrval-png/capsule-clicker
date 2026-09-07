@@ -61,14 +61,25 @@ object OverlayController {
         // Ряд кнопок: Цель / Старт
         val row1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val targetBtn = Button(ctx).apply {
-            text = "Цель"
+            text = "+ Цель"
             setOnClickListener { startTargetPick(ctx) }
+        }
+        val resetBtn = Button(ctx).apply {
+            text = "Сброс"
+            setOnClickListener {
+                ClickerState.templates.clear()
+                ClickerState.region = null
+                ClickerState.running = false
+                startBtn?.text = "Старт"
+                statusView?.text = "Цели очищены"
+            }
         }
         startBtn = Button(ctx).apply {
             text = "Старт"
             setOnClickListener { toggleRun() }
         }
         row1.addView(targetBtn)
+        row1.addView(resetBtn)
         row1.addView(startBtn)
         root.addView(row1)
 
@@ -196,7 +207,7 @@ object OverlayController {
         if (picker != null) return
 
         val overlay = TextView(ctx).apply {
-            text = "Тапни по КАПСУЛЕ (цели)"
+            text = "Тапни по КАПСУЛЕ (добавить цель ${ClickerState.templates.size + 1})"
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             setPadding(0, dp(ctx, 60), 0, 0)
             setTextColor(Color.WHITE)
@@ -242,20 +253,29 @@ object OverlayController {
         val bottom = (cy + half).coerceIn(top + 1, fh)
         val rect = Rect(left, top, right, bottom)
 
-        ClickerState.template = Matcher.cropGray(frame, fw, fh, rect)
-        ClickerState.templateW = rect.width()
-        ClickerState.templateH = rect.height()
+        // Добавляем новую цель к списку (несколько разных капсул).
+        val gray = Matcher.cropGray(frame, fw, fh, rect)
+        ClickerState.templates.add(ClickerState.Template(gray, rect.width(), rect.height()))
 
-        // Зона поиска — рамка вокруг цели, чтобы искать быстро и без ложных находок.
+        // Зона поиска — рамка вокруг цели; при нескольких целях расширяем объединением.
         val m = 400
-        ClickerState.region = Rect(
+        val box = Rect(
             (cx - m).coerceIn(0, fw),
             (cy - m).coerceIn(0, fh),
             (cx + m).coerceIn(0, fw),
             (cy + m).coerceIn(0, fh)
         )
+        val cur = ClickerState.region
+        ClickerState.region = if (cur == null) box else Rect(
+            minOf(cur.left, box.left),
+            minOf(cur.top, box.top),
+            maxOf(cur.right, box.right),
+            maxOf(cur.bottom, box.bottom)
+        )
+
+        val count = ClickerState.templates.size
         ui.post {
-            statusView?.text = "Цель задана ${rect.width()}x${rect.height()} — жми «Старт»"
+            statusView?.text = "Целей: $count — «+ Цель» добавить ещё или «Старт»"
         }
     }
 
