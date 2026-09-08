@@ -3,6 +3,7 @@ package com.capsule.clicker
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Handler
@@ -60,6 +61,25 @@ object OverlayController {
         root.addView(statusView)
 
         // Ряд кнопок: Цель / Старт
+        // Переключатель режима: Шаблон / Цвет
+        val modeBtn = Button(ctx)
+        modeBtn.text = modeText()
+        modeBtn.setOnClickListener {
+            ClickerState.mode =
+                if (ClickerState.mode == ClickerState.Mode.TEMPLATE)
+                    ClickerState.Mode.COLOR else ClickerState.Mode.TEMPLATE
+            ClickerState.running = false
+            startBtn?.text = "Старт"
+            ClickerState.cooldownMs = if (ClickerState.mode == ClickerState.Mode.COLOR) 150L else 500L
+            modeBtn.text = modeText()
+            updateParamLabel()
+            statusView?.text =
+                if (ClickerState.mode == ClickerState.Mode.COLOR)
+                    "Режим ЦВЕТ: обведи летящий объект, потом Старт"
+                else "Режим ШАБЛОН: обведи капсулу(ы), потом Старт"
+        }
+        root.addView(modeBtn)
+
         // Ряд целей: + Цель / Убрать / Сброс
         val row1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val targetBtn = Button(ctx).apply {
@@ -118,7 +138,7 @@ object OverlayController {
         }
         val minus = Button(ctx).apply {
             text = "−"
-            setOnClickListener { changeThreshold(-0.05f) }
+            setOnClickListener { changeParam(-1) }
         }
         thrView = TextView(ctx).apply {
             text = "порог ${fmt(ClickerState.threshold)}"
@@ -128,7 +148,7 @@ object OverlayController {
         }
         val plus = Button(ctx).apply {
             text = "+"
-            setOnClickListener { changeThreshold(0.05f) }
+            setOnClickListener { changeParam(1) }
         }
         row2.addView(minus)
         row2.addView(thrView)
@@ -247,8 +267,10 @@ object OverlayController {
 
     private fun toggleRun() {
         if (!ClickerState.running) {
-            if (!ClickerState.hasTemplate()) {
-                statusView?.text = "Сначала нажми «Цель»"
+            val ready = if (ClickerState.mode == ClickerState.Mode.COLOR)
+                ClickerState.hasColorTarget else ClickerState.hasTemplate()
+            if (!ready) {
+                statusView?.text = "Сначала обведи цель кнопкой «+ Цель»"
                 return
             }
             if (ClickAccessibilityService.instance == null) {
@@ -263,13 +285,24 @@ object OverlayController {
         }
     }
 
-    private fun changeThreshold(delta: Float) {
-        ClickerState.threshold = (ClickerState.threshold + delta).coerceIn(0.30f, 0.98f)
-        thrView?.text = "порог ${fmt(ClickerState.threshold)}"
+    private fun modeText(): String =
+        if (ClickerState.mode == ClickerState.Mode.COLOR) "Режим: ЦВЕТ" else "Режим: ШАБЛОН"
+
+    private fun updateParamLabel() {
+        thrView?.text = if (ClickerState.mode == ClickerState.Mode.COLOR)
+            "допуск ${ClickerState.colorTol}" else "порог ${fmt(ClickerState.threshold)}"
     }
 
-    // ── Выбор цели: полноэкранный слой, один тап по капсуле ──
-    @SuppressLint("ClickableViewAccessibility")
+    private fun changeParam(dir: Int) {
+        if (ClickerState.mode == ClickerState.Mode.COLOR) {
+            ClickerState.colorTol = (ClickerState.colorTol + dir * 10).coerceIn(10, 150)
+        } else {
+            ClickerState.threshold = (ClickerState.threshold + dir * 0.05f).coerceIn(0.30f, 0.98f)
+        }
+        updateParamLabel()
+    }
+
+    // ── Выбор цели: полноэкранный слой, ОБВОДИШЬ капсулу рамкой ──
     private fun startTargetPick(ctx: Context) {
         if (ClickerState.frame == null) {
             statusView?.text = "Нет кадра — запусти захват (шаг 3)"
@@ -277,13 +310,17 @@ object OverlayController {
         }
         if (picker != null) return
 
-        val overlay = TextView(ctx).apply {
-            text = "Тапни по КАПСУЛЕ (добавить цель ${ClickerState.templates.size + 1})"
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(ctx, 60), 0, 0)
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            setBackgroundColor(Color.argb(90, 0, 0, 0))
+        val sel = SelectionView(ctx) { rect ->
+            removePicker()
+            if (rect != null && rect.width() > 8 && rect.height() > 8) {
+                if (ClickerState.mode == ClickerState.Mode.COLOR) {
+                    captureColorFromRect(rect)
+                } else {
+                    captureTemplateFromRect(rect)
+                }
+            } else {
+                statusView?.text = "Рамка слишком мала — попробуй ещё"
+            }
         }
 
         val params = WindowManager.LayoutParams(
@@ -295,17 +332,10 @@ object OverlayController {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
-
-        overlay.setOnTouchListener { _, e ->
-            if (e.action == MotionEvent.ACTION_DOWN) {
-                captureTemplateAt(e.rawX.toInt(), e.rawY.toInt())
-                removePicker()
-                true
-            } else false
-        }
-
-        wm?.addView(overlay, params)
-        picker = overlay
+        try {
+            wm?.addView(sel, params)
+            picker = sel
+        } catch (_: Exception) {}
     }
 
     private fun removePicker() {
@@ -313,31 +343,29 @@ object OverlayController {
         picker = null
     }
 
-    private fun captureTemplateAt(cx: Int, cy: Int) {
+    private fun captureTemplateFromRect(rect: Rect) {
         val frame = ClickerState.frame ?: return
         val fw = ClickerState.frameW
         val fh = ClickerState.frameH
-        val half = 70              // шаблон ~140x140 px
-        val left = (cx - half).coerceIn(0, fw - 2)
-        val top = (cy - half).coerceIn(0, fh - 2)
-        val right = (cx + half).coerceIn(left + 1, fw)
-        val bottom = (cy + half).coerceIn(top + 1, fh)
-        val rect = Rect(left, top, right, bottom)
+        val left = rect.left.coerceIn(0, fw - 2)
+        val top = rect.top.coerceIn(0, fh - 2)
+        val right = rect.right.coerceIn(left + 1, fw)
+        val bottom = rect.bottom.coerceIn(top + 1, fh)
+        val r = Rect(left, top, right, bottom)
 
-        // Добавляем новую цель к списку (несколько разных капсул).
-        val gray = Matcher.cropGray(frame, fw, fh, rect)
-        val color = Matcher.cropArgb(frame, fw, fh, rect)
+        val gray = Matcher.cropGray(frame, fw, fh, r)
+        val color = Matcher.cropArgb(frame, fw, fh, r)
         ClickerState.templates.add(
-            ClickerState.Template(gray, color, rect.width(), rect.height())
+            ClickerState.Template(gray, color, r.width(), r.height())
         )
 
-        // Зона поиска — рамка вокруг цели; при нескольких целях расширяем объединением.
-        val m = 400
+        // Зона поиска — рамка с запасом вокруг цели; при нескольких целях объединяем.
+        val m = 250
         val box = Rect(
-            (cx - m).coerceIn(0, fw),
-            (cy - m).coerceIn(0, fh),
-            (cx + m).coerceIn(0, fw),
-            (cy + m).coerceIn(0, fh)
+            (r.left - m).coerceIn(0, fw),
+            (r.top - m).coerceIn(0, fh),
+            (r.right + m).coerceIn(0, fw),
+            (r.bottom + m).coerceIn(0, fh)
         )
         val cur = ClickerState.region
         ClickerState.region = if (cur == null) box else Rect(
@@ -349,7 +377,74 @@ object OverlayController {
 
         val count = ClickerState.templates.size
         ui.post {
-            statusView?.text = "Целей: $count — «+ Цель» добавить ещё или «Старт»"
+            statusView?.text = "Целей: $count (${r.width()}x${r.height()}) — «+ Цель» ещё или «Старт»"
+        }
+    }
+
+    /** Режим ЦВЕТ: берём средний цвет обведённой области как цель, зона поиска — весь экран. */
+    private fun captureColorFromRect(rect: Rect) {
+        val frame = ClickerState.frame ?: return
+        val fw = ClickerState.frameW
+        val fh = ClickerState.frameH
+        val left = rect.left.coerceIn(0, fw - 2)
+        val top = rect.top.coerceIn(0, fh - 2)
+        val right = rect.right.coerceIn(left + 1, fw)
+        val bottom = rect.bottom.coerceIn(top + 1, fh)
+
+        var sr = 0L; var sg = 0L; var sb = 0L; var n = 0L
+        var y = top
+        while (y < bottom) {
+            val row = y * fw
+            var x = left
+            while (x < right) {
+                val p = frame[row + x]
+                sr += (p shr 16) and 0xFF
+                sg += (p shr 8) and 0xFF
+                sb += p and 0xFF
+                n++
+                x++
+            }
+            y++
+        }
+        if (n == 0L) return
+        ClickerState.colR = (sr / n).toInt()
+        ClickerState.colG = (sg / n).toInt()
+        ClickerState.colB = (sb / n).toInt()
+        ClickerState.hasColorTarget = true
+        ClickerState.region = null      // цвет ищем по всему экрану (объект летает далеко)
+
+        ui.post {
+            statusView?.text = "Цвет цели RGB(${ClickerState.colR},${ClickerState.colG}," +
+                "${ClickerState.colB}) — жми «Старт»"
+        }
+    }
+
+    /** Затухающий крестик в точке клика (вызывается из сервиса при каждом тапе). */
+    fun showClickMarker(x: Int, y: Int) {
+        val manager = wm ?: return
+        ui.post {
+            val ctx = panel?.context ?: return@post
+            val size = dp(ctx, 48)
+            val cross = CrossView(ctx)
+            val mp = WindowManager.LayoutParams(
+                size, size,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                this.x = x - size / 2
+                this.y = y - size / 2
+            }
+            try {
+                manager.addView(cross, mp)
+                cross.animate().alpha(0f).setDuration(600).withEndAction {
+                    try { manager.removeView(cross) } catch (_: Exception) {}
+                }.start()
+            } catch (_: Exception) {}
         }
     }
 
@@ -357,4 +452,83 @@ object OverlayController {
 
     private fun dp(ctx: Context, v: Int): Int =
         (v * ctx.resources.displayMetrics.density).toInt()
+
+    /** Полупрозрачный слой: тянешь палец — рисуется рамка; отпустил — вернёт её. */
+    @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
+    private class SelectionView(
+        ctx: Context,
+        val onDone: (Rect?) -> Unit
+    ) : View(ctx) {
+        private var sx = 0f; private var sy = 0f     // старт (экранные)
+        private var cxp = 0f; private var cyp = 0f   // текущая (экранные)
+        private var lsx = 0f; private var lsy = 0f   // старт (локальные, для рисунка)
+        private var lcx = 0f; private var lcy = 0f   // текущая (локальные)
+        private var drawing = false
+
+        private val dim = Paint().apply { color = Color.argb(80, 0, 0, 0) }
+        private val line = Paint().apply {
+            color = Color.parseColor("#FF3355")
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            isAntiAlias = true
+        }
+        private val hint = Paint().apply {
+            color = Color.WHITE
+            textSize = 44f
+            isAntiAlias = true
+        }
+
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            when (e.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    sx = e.rawX; sy = e.rawY; cxp = sx; cyp = sy
+                    lsx = e.x; lsy = e.y; lcx = e.x; lcy = e.y
+                    drawing = true; invalidate()
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    cxp = e.rawX; cyp = e.rawY; lcx = e.x; lcy = e.y; invalidate()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    drawing = false
+                    val r = Rect(
+                        minOf(sx, cxp).toInt(), minOf(sy, cyp).toInt(),
+                        maxOf(sx, cxp).toInt(), maxOf(sy, cyp).toInt()
+                    )
+                    onDone(r)
+                }
+            }
+            return true
+        }
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dim)
+            canvas.drawText("Обведи цель рамкой", 40f, 90f, hint)
+            if (drawing) {
+                canvas.drawRect(
+                    minOf(lsx, lcx), minOf(lsy, lcy),
+                    maxOf(lsx, lcx), maxOf(lsy, lcy), line
+                )
+            }
+        }
+    }
+
+    /** Крестик клика: круг + косой крест. */
+    @SuppressLint("ViewConstructor")
+    private class CrossView(ctx: Context) : View(ctx) {
+        private val ring = Paint().apply {
+            color = Color.parseColor("#FFD633"); style = Paint.Style.STROKE
+            strokeWidth = 4f; isAntiAlias = true
+        }
+        private val cross = Paint().apply {
+            color = Color.parseColor("#FF3355"); style = Paint.Style.STROKE
+            strokeWidth = 6f; isAntiAlias = true
+        }
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            val w = width.toFloat(); val h = height.toFloat()
+            val pad = w * 0.18f
+            canvas.drawOval(4f, 4f, w - 4f, h - 4f, ring)
+            canvas.drawLine(pad, pad, w - pad, h - pad, cross)
+            canvas.drawLine(w - pad, pad, pad, h - pad, cross)
+        }
+    }
 }

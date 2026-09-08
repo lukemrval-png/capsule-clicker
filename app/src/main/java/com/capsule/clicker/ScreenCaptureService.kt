@@ -155,6 +155,13 @@ class ScreenCaptureService : Service() {
             ClickerState.status("🖐 ты трогаешь экран — пауза")
             return
         }
+
+        // Режим ЦВЕТА — отдельная ветка (для летящих/вращающихся объектов).
+        if (ClickerState.mode == ClickerState.Mode.COLOR) {
+            detectColor(frame)
+            return
+        }
+
         val tmpls = ClickerState.templates
         if (tmpls.isEmpty()) {
             ClickerState.status("Целей нет — нажми «Цель»")
@@ -231,6 +238,7 @@ class ScreenCaptureService : Service() {
                 val svc = ClickAccessibilityService.instance
                 if (svc != null) {
                     svc.tap(fullX.toFloat(), fullY.toFloat())
+                    OverlayController.showClickMarker(fullX, fullY)   // затухающий крестик
                     ClickerState.lastClickAt = now
                     ClickerState.lastSelfTapAt = now   // чтобы наш тап не приняли за касание юзера
                     ClickerState.clicks++
@@ -243,6 +251,65 @@ class ScreenCaptureService : Service() {
             }
         } else {
             ClickerState.status("сходство ${fmt(best)} / порог ${fmt(ClickerState.threshold)}  (целей ${tmpls.size})")
+        }
+    }
+
+    private fun detectColor(frame: IntArray) {
+        if (!ClickerState.hasColorTarget) {
+            ClickerState.status("Цвет не задан — обведи объект в режиме «Цвет»")
+            return
+        }
+        val base = ClickerState.region ?: Rect(0, 0, w, h)
+        val rc = Rect(
+            base.left.coerceIn(0, w - 1),
+            base.top.coerceIn(0, h - 1),
+            base.right.coerceIn(1, w),
+            base.bottom.coerceIn(1, h)
+        )
+        val blob = ColorFinder.find(
+            frame, w, h, rc,
+            ClickerState.colR, ClickerState.colG, ClickerState.colB,
+            ClickerState.colorTol, ClickerState.minBlob, ClickerState.searchScale
+        )
+        ClickerState.lastScore = blob.count.toFloat()
+        val now = System.currentTimeMillis()
+
+        if (!blob.found) {
+            ClickerState.prevT = 0
+            ClickerState.status("нет объекта (точек ${blob.count}, допуск ${ClickerState.colorTol})")
+            return
+        }
+
+        // Упреждение: считаем скорость по двум последним детекциям и целимся вперёд.
+        var tx = blob.cx
+        var ty = blob.cy
+        if (ClickerState.prevT > 0 && now - ClickerState.prevT in 1..300) {
+            val dt = (now - ClickerState.prevT) / 1000f
+            if (dt > 0f) {
+                val vx = (blob.cx - ClickerState.prevCx) / dt
+                val vy = (blob.cy - ClickerState.prevCy) / dt
+                tx += (vx * ClickerState.leadMs / 1000f).toInt()
+                ty += (vy * ClickerState.leadMs / 1000f).toInt()
+            }
+        }
+        ClickerState.prevCx = blob.cx
+        ClickerState.prevCy = blob.cy
+        ClickerState.prevT = now
+        tx = tx.coerceIn(0, w - 1)
+        ty = ty.coerceIn(0, h - 1)
+
+        if (now - ClickerState.lastClickAt >= ClickerState.cooldownMs) {
+            val svc = ClickAccessibilityService.instance
+            if (svc != null) {
+                svc.tap(tx.toFloat(), ty.toFloat())
+                OverlayController.showClickMarker(tx, ty)
+                ClickerState.lastClickAt = now
+                ClickerState.lastSelfTapAt = now
+                ClickerState.clicks++
+                ClickerState.status("Клик #${ClickerState.clicks} (цвет, точек ${blob.count}) @($tx,$ty)")
+            } else {
+                ClickerState.status("Служба тапов ВЫКЛ — включи в настройках")
+            }
         }
     }
 

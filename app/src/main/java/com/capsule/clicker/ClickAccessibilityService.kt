@@ -3,6 +3,7 @@ package com.capsule.clicker
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.view.MotionEvent
 import android.view.accessibility.AccessibilityEvent
 
 /**
@@ -20,6 +21,18 @@ class ClickAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* не используется */ }
 
     override fun onInterrupt() { /* не используется */ }
+
+    /**
+     * Приходит на Android 14+ (flagSendMotionEvents): пока ПОЛЬЗОВАТЕЛЬ трогает
+     * экран, помечаем время — тогда кликер замолкает и не мешает прокрутке.
+     * Свои же тапы (dispatchGesture) отсекаем по времени, чтобы не пометить их.
+     */
+    override fun onMotionEvent(event: MotionEvent) {
+        val now = System.currentTimeMillis()
+        if (now - ClickerState.lastSelfTapAt > 250) {
+            ClickerState.lastUserTouchAt = now
+        }
+    }
 
     override fun onDestroy() {
         if (instance === this) instance = null

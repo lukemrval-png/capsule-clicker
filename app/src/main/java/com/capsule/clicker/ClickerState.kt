@@ -9,6 +9,10 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 object ClickerState {
 
+    // Режим детекции: по шаблону (форма) или по цвету (для летящих/вращающихся).
+    enum class Mode { TEMPLATE, COLOR }
+    @Volatile var mode = Mode.TEMPLATE
+
     // ── Параметры кликера ─────────────────────────────────────────────
     @Volatile var running = false          // включён ли автокликер (тапы)
     @Volatile var adPaused = false         // «реклама»: стоп, ничего не нажимаем (как F8)
@@ -17,6 +21,15 @@ object ClickerState {
     @Volatile var useColorCheck = true     // проверять цвет цели (меньше ложных кликов)
     @Volatile var cooldownMs = 500L        // пауза после клика, мс
     @Volatile var searchScale = 0.25f      // даунскейл при поиске (меньше = быстрее, грубее)
+
+    // ── Режим ЦВЕТА (цветовая погоня за объектом) ──
+    @Volatile var hasColorTarget = false   // задан ли цвет-цель
+    @Volatile var colR = 0; @Volatile var colG = 0; @Volatile var colB = 0  // цвет объекта
+    @Volatile var colorTol = 45            // допуск по цвету (больше = ловит шире)
+    @Volatile var minBlob = 10             // мин. число совпавших точек, чтобы считать объектом
+    @Volatile var leadMs = 80f             // упреждение: бить туда, где объект будет через N мс
+    // состояние для расчёта скорости объекта
+    @Volatile var prevCx = 0; @Volatile var prevCy = 0; @Volatile var prevT = 0L
 
     // ── Последний кадр экрана (ARGB), обновляет ScreenCaptureService ──
     @Volatile var frame: IntArray? = null
