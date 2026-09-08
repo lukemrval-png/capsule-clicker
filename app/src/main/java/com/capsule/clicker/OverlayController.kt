@@ -24,6 +24,7 @@ object OverlayController {
     private var wm: WindowManager? = null
     private var panel: View? = null
     private var picker: View? = null
+    private var watcher: View? = null
     private var statusView: TextView? = null
     private var startBtn: Button? = null
     private var thrView: TextView? = null
@@ -148,7 +149,9 @@ object OverlayController {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            // NOT_TOUCH_MODAL — касания ВНЕ панели уходят игре (иначе экран не прокрутить).
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -189,11 +192,52 @@ object OverlayController {
                 statusView?.text = s
             }
         }
+
+        addTouchWatcher(ctx)
+    }
+
+    /**
+     * Крошечное окно 1x1, которое ловит касания ВНЕ себя (FLAG_WATCH_OUTSIDE_TOUCH).
+     * Как только пользователь тронул экран — запоминаем время, и кликер на userIdleMs
+     * замолкает (можно спокойно прокручивать/играть). Свои тапы отсекаем по времени.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun addTouchWatcher(ctx: Context) {
+        if (watcher != null) return
+        val v = View(ctx)
+        val wp = WindowManager.LayoutParams(
+            1, 1,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+        v.setOnTouchListener { _, e ->
+            if (e.action == MotionEvent.ACTION_OUTSIDE) {
+                val now = System.currentTimeMillis()
+                // Игнорируем событие от НАШЕГО же тапа (в пределах 250 мс).
+                if (now - ClickerState.lastSelfTapAt > 250) {
+                    ClickerState.lastUserTouchAt = now
+                }
+            }
+            false
+        }
+        try {
+            wm?.addView(v, wp)
+            watcher = v
+        } catch (_: Exception) {}
     }
 
     fun hide() {
         ClickerState.statusListener = null
         removePicker()
+        watcher?.let { try { wm?.removeView(it) } catch (_: Exception) {} }
+        watcher = null
         panel?.let { try { wm?.removeView(it) } catch (_: Exception) {} }
         panel = null
         statusView = null

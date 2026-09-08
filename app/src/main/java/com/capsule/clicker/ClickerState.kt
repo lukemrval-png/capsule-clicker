@@ -33,6 +33,11 @@ object ClickerState {
     // Расширяется по мере добавления целей.
     @Volatile var region: Rect? = null
 
+    // ── Не мешать пользователю ──
+    @Volatile var lastUserTouchAt = 0L     // когда пользователь последний раз трогал экран
+    @Volatile var userIdleMs = 900L        // столько мс после касания НЕ кликаем (даём прокрутить)
+    @Volatile var lastSelfTapAt = 0L       // когда МЫ сами тапнули (чтобы не считать это касанием юзера)
+
     // ── Диагностика ──
     @Volatile var lastScore = 0f
     @Volatile var lastClickAt = 0L

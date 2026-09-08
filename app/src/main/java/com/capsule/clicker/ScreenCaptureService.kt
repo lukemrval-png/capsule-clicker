@@ -150,6 +150,11 @@ class ScreenCaptureService : Service() {
             ClickerState.status("📺 реклама — стоп (жми «Реклама» чтобы продолжить)")
             return
         }
+        // Пока пользователь трогает экран (свайп/прокрутка) — не тапаем, не мешаем.
+        if (System.currentTimeMillis() - ClickerState.lastUserTouchAt < ClickerState.userIdleMs) {
+            ClickerState.status("🖐 ты трогаешь экран — пауза")
+            return
+        }
         val tmpls = ClickerState.templates
         if (tmpls.isEmpty()) {
             ClickerState.status("Целей нет — нажми «Цель»")
@@ -227,6 +232,7 @@ class ScreenCaptureService : Service() {
                 if (svc != null) {
                     svc.tap(fullX.toFloat(), fullY.toFloat())
                     ClickerState.lastClickAt = now
+                    ClickerState.lastSelfTapAt = now   // чтобы наш тап не приняли за касание юзера
                     ClickerState.clicks++
                     ClickerState.status(
                         "Клик #${ClickerState.clicks}  цель ${bestIdx + 1}/${tmpls.size}  ${fmt(best)}  @($fullX,$fullY)"
