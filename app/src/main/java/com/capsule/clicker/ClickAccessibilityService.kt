@@ -1,8 +1,10 @@
 package com.capsule.clicker
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.os.Build
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityEvent
 
@@ -15,6 +17,16 @@ class ClickAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // Android 14+: попросить систему присылать нам события касаний (onMotionEvent),
+        // чтобы кликер замолкал, пока пользователь трогает экран. Флаг из кода —
+        // соответствующий XML-атрибут есть только с Android 15.
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                val info = serviceInfo
+                info.flags = info.flags or AccessibilityServiceInfo.FLAG_SEND_MOTION_EVENTS
+                serviceInfo = info
+            } catch (_: Throwable) { /* не критично — есть запасной механизм */ }
+        }
         ClickerState.status("Служба тапов подключена")
     }
 

@@ -283,8 +283,9 @@ class ScreenCaptureService : Service() {
         // Упреждение: считаем скорость по двум последним детекциям и целимся вперёд.
         var tx = blob.cx
         var ty = blob.cy
-        if (ClickerState.prevT > 0 && now - ClickerState.prevT in 1..300) {
-            val dt = (now - ClickerState.prevT) / 1000f
+        val dtMs = now - ClickerState.prevT
+        if (ClickerState.prevT > 0L && dtMs in 1L..300L) {
+            val dt = dtMs / 1000f
             if (dt > 0f) {
                 val vx = (blob.cx - ClickerState.prevCx) / dt
                 val vy = (blob.cy - ClickerState.prevCy) / dt
