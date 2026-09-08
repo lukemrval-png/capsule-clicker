@@ -37,6 +37,56 @@ object Matcher {
         return out
     }
 
+    /** Вырезать прямоугольник из кадра как есть (ARGB) — для проверки цвета. */
+    fun cropArgb(frame: IntArray, fw: Int, fh: Int, rect: Rect): IntArray {
+        val w = rect.width()
+        val h = rect.height()
+        val out = IntArray(w * h)
+        var i = 0
+        var y = rect.top
+        while (y < rect.bottom) {
+            val row = y * fw
+            var x = rect.left
+            while (x < rect.right) {
+                out[i++] = frame[row + x]
+                x++
+            }
+            y++
+        }
+        return out
+    }
+
+    /** Подтверждение цветом: NCC по каналам R,G,B между найденным местом и шаблоном.
+     *  Оба массива одного размера. Возвращает 0..1 (или -1 при несовпадении размеров). */
+    fun colorScore(roi: IntArray, tmpl: IntArray): Float {
+        val n = roi.size
+        if (n == 0 || n != tmpl.size) return -1f
+        var mr1 = 0.0; var mg1 = 0.0; var mb1 = 0.0
+        var mr2 = 0.0; var mg2 = 0.0; var mb2 = 0.0
+        for (k in 0 until n) {
+            val a = roi[k]; val b = tmpl[k]
+            mr1 += (a shr 16) and 0xFF; mg1 += (a shr 8) and 0xFF; mb1 += a and 0xFF
+            mr2 += (b shr 16) and 0xFF; mg2 += (b shr 8) and 0xFF; mb2 += b and 0xFF
+        }
+        mr1 /= n; mg1 /= n; mb1 /= n
+        mr2 /= n; mg2 /= n; mb2 /= n
+        var dot = 0.0; var na = 0.0; var nb = 0.0
+        for (k in 0 until n) {
+            val a = roi[k]; val b = tmpl[k]
+            val ar = ((a shr 16) and 0xFF) - mr1
+            val ag = ((a shr 8) and 0xFF) - mg1
+            val ab = (a and 0xFF) - mb1
+            val br = ((b shr 16) and 0xFF) - mr2
+            val bg = ((b shr 8) and 0xFF) - mg2
+            val bb = (b and 0xFF) - mb2
+            dot += ar * br + ag * bg + ab * bb
+            na += ar * ar + ag * ag + ab * ab
+            nb += br * br + bg * bg + bb * bb
+        }
+        if (na < 1e-6 || nb < 1e-6) return -1f
+        return (dot / (sqrt(na) * sqrt(nb))).toFloat()
+    }
+
     /** Уменьшение grayscale-массива (ближайший сосед). Размеры пишутся в outWH. */
     fun downscale(src: IntArray, w: Int, h: Int, scale: Float, outWH: IntArray): IntArray {
         val dw = maxOf(1, (w * scale).toInt())

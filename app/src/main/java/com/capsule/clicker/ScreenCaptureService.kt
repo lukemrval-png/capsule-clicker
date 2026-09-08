@@ -146,6 +146,10 @@ class ScreenCaptureService : Service() {
 
     private fun detect(frame: IntArray, regWH: IntArray, tmpWH: IntArray) {
         if (!ClickerState.running) return
+        if (ClickerState.adPaused) {
+            ClickerState.status("📺 реклама — стоп (жми «Реклама» чтобы продолжить)")
+            return
+        }
         val tmpls = ClickerState.templates
         if (tmpls.isEmpty()) {
             ClickerState.status("Целей нет — нажми «Цель»")
@@ -175,6 +179,7 @@ class ScreenCaptureService : Service() {
         var bestTW = 0
         var bestTH = 0
         var bestIdx = -1
+        var bestTmpl: ClickerState.Template? = null
 
         for ((i, t) in tmpls.withIndex()) {
             val tmplDown = Matcher.downscale(t.gray, t.w, t.h, scale, tmpWH)
@@ -186,14 +191,36 @@ class ScreenCaptureService : Service() {
                 bestTW = t.w
                 bestTH = t.h
                 bestIdx = i
+                bestTmpl = t
             }
         }
         ClickerState.lastScore = best
 
-        if (best >= ClickerState.threshold && bestIdx >= 0) {
+        if (best >= ClickerState.threshold && bestIdx >= 0 && bestTmpl != null) {
             // Координаты из масштаба поиска -> в полный экран, к центру шаблона.
             val fullX = rc.left + (bestX / scale).toInt() + bestTW / 2
             val fullY = rc.top + (bestY / scale).toInt() + bestTH / 2
+
+            // ── Подтверждение ЦВЕТОМ (2-я ступень): grayscale не различает цвета,
+            // из-за чего разные капсулы можно спутать. Сверяем найденное место с
+            // цветом шаблона в полном разрешении. Не прошло — не наш объект.
+            if (ClickerState.useColorCheck) {
+                val tlx = (fullX - bestTW / 2).coerceIn(0, w - bestTW)
+                val tly = (fullY - bestTH / 2).coerceIn(0, h - bestTH)
+                if (bestTW in 1..w && bestTH in 1..h) {
+                    val roi = Matcher.cropArgb(
+                        frame, w, h, Rect(tlx, tly, tlx + bestTW, tly + bestTH)
+                    )
+                    val cs = Matcher.colorScore(roi, bestTmpl.color)
+                    if (cs in 0f..ClickerState.colorConf) {
+                        ClickerState.status(
+                            "цвет не совпал ${fmt(cs)}/${fmt(ClickerState.colorConf)} — пропуск"
+                        )
+                        return
+                    }
+                }
+            }
+
             val now = System.currentTimeMillis()
             if (now - ClickerState.lastClickAt >= ClickerState.cooldownMs) {
                 val svc = ClickAccessibilityService.instance

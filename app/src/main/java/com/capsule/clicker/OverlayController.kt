@@ -59,10 +59,23 @@ object OverlayController {
         root.addView(statusView)
 
         // Ряд кнопок: Цель / Старт
+        // Ряд целей: + Цель / Убрать / Сброс
         val row1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val targetBtn = Button(ctx).apply {
             text = "+ Цель"
             setOnClickListener { startTargetPick(ctx) }
+        }
+        val undoBtn = Button(ctx).apply {
+            text = "Убрать"
+            setOnClickListener {
+                val list = ClickerState.templates
+                if (list.isNotEmpty()) {
+                    list.removeAt(list.size - 1)
+                    statusView?.text = "Убрана последняя. Целей: ${list.size}"
+                } else {
+                    statusView?.text = "Целей нет"
+                }
+            }
         }
         val resetBtn = Button(ctx).apply {
             text = "Сброс"
@@ -74,14 +87,28 @@ object OverlayController {
                 statusView?.text = "Цели очищены"
             }
         }
+        row1.addView(targetBtn)
+        row1.addView(undoBtn)
+        row1.addView(resetBtn)
+        root.addView(row1)
+
+        // Ряд работы: Старт / Реклама
+        val rowRun = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         startBtn = Button(ctx).apply {
             text = "Старт"
             setOnClickListener { toggleRun() }
         }
-        row1.addView(targetBtn)
-        row1.addView(resetBtn)
-        row1.addView(startBtn)
-        root.addView(row1)
+        val adBtn = Button(ctx)
+        adBtn.text = "Реклама"
+        adBtn.setOnClickListener {
+            ClickerState.adPaused = !ClickerState.adPaused
+            adBtn.text = if (ClickerState.adPaused) "▶ Дальше" else "Реклама"
+            statusView?.text =
+                if (ClickerState.adPaused) "📺 пауза на рекламе" else "продолжаю"
+        }
+        rowRun.addView(startBtn)
+        rowRun.addView(adBtn)
+        root.addView(rowRun)
 
         // Ряд порога: −  0.65  +
         val row2 = LinearLayout(ctx).apply {
@@ -255,7 +282,10 @@ object OverlayController {
 
         // Добавляем новую цель к списку (несколько разных капсул).
         val gray = Matcher.cropGray(frame, fw, fh, rect)
-        ClickerState.templates.add(ClickerState.Template(gray, rect.width(), rect.height()))
+        val color = Matcher.cropArgb(frame, fw, fh, rect)
+        ClickerState.templates.add(
+            ClickerState.Template(gray, color, rect.width(), rect.height())
+        )
 
         // Зона поиска — рамка вокруг цели; при нескольких целях расширяем объединением.
         val m = 400
